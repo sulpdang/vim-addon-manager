@@ -883,4 +883,57 @@ fun! vam#install#ShowShortLog(info, repository, pluginDir, hook_opts)
   endif
 endfun
 
+fun! vam#install#RecordAddons(plugins) abort
+  " Hacky implementation. Assumes
+  " - each plugin is located in aa vim-addons like subdirectory
+  " - pluginDirFromName returns a direct subdirectory of that
+  " - that you have loaded all plugins ar pass the plugins to record as list
+  "   via plugins
+  let gitParent = vam#PluginDirFromName('')
+  let initial = 0
+  if !isdirectory(gitParent.'/.git')
+    if 1 == confirm('Create containing git repository in '.gitParent.'?', "&Yes\n&No")
+      " make sure initial .git directory exists
+      call vam#utils#ExecInDir(gitParent, 'git init')
+      let initial = 1
+    else
+      throw "Couldn't determine containing git repository"
+    endif
+  endif
+
+  let plugins = a:plugins
+  if empty(plugins)
+    if 1 == confirm('git add all activated plugins ?', "&Yes\n&No")
+      let plugins = keys(g:vim_addon_manager.activated_plugins)
+    endif
+  endif
+
+  let diff = system('cd '.gitParent.'; git diff')
+  if diff != '' && 1 != confirm(gitParent.' is not clean, ignore ?',  "&Yes\n&No")
+    throw "abort"
+  endif
+
+
+  let submodules = []
+  for p in plugins
+    let pluginDir = vam#PluginDirFromName(p)
+    if isdirectory(pluginDir.'/.git')
+      " git submodule ?
+      echo "trying to add / update git submodule ".pluginDir
+      call vam#utils#ExecInDir(gitParent, 'git submodule add $ || true', './'.fnamemodify(pluginDir, ':t'))
+    else
+      echo "adding/ updating ".pluginDir
+      call vam#utils#ExecInDir(pluginDir, 'git add -A .')
+    endif
+  endfor
+
+  enew
+  if !initial
+    exec 'r! ( cd '.gitParent.' ; git diff )'
+  endif
+  call append('$', [":Commit to commit this changes. You'll be given a chance to provide a commit message"])
+  let b:gitParent = gitParent
+  command -buffer Commit call vam#utils#ExecInDir(b:gitParent, 'git commit -am $', input('git message: ', 'plugin updates'))
+endf
+
 " vim: et ts=8 sts=2 sw=2
